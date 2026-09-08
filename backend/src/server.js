@@ -12,15 +12,15 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// CORS: libera apenas a(s) origem(ns) do frontend definidas em FRONTEND_URL.
-// Aceita múltiplas URLs separadas por vírgula (ex: dev local + produção).
-const allowedOrigins = (process.env.FRONTEND_URL || "*")
-  .split(",")
-  .map((o) => o.trim());
+// CORS: define explicitamente os domínios permitidos via variável de ambiente.
+const allowedOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(",").map((o) => o.trim())
+  : [];
 
 app.use(
   cors({
     origin: (origin, callback) => {
+      // Em ambiente de desenvolvimento local, permite sem 'origin' (Postman/Curl)
       if (
         !origin ||
         allowedOrigins.includes("*") ||
@@ -34,10 +34,32 @@ app.use(
   })
 );
 
+// Middleware de proteção para rotas administrativas/sensíveis
+const requireAuth = (req, res, next) => {
+  const adminSecret = process.env.ADMIN_API_KEY;
+
+  if (!adminSecret) {
+    console.error("[security] ADMIN_API_KEY não definida nas variáveis de ambiente.");
+    return res.status(500).json({ error: "Erro na configuração de segurança da API." });
+  }
+
+  const authHeader = req.headers.authorization;
+  const customHeader = req.headers["x-admin-key"];
+
+  const providedKey = authHeader?.startsWith("Bearer ")
+    ? authHeader.split(" ")[1]
+    : customHeader;
+
+  if (!providedKey || providedKey !== adminSecret) {
+    return res.status(401).json({ error: "Acesso não autorizado." });
+  }
+
+  next();
+};
+
 // ─── Rotas ──────────────────────────────────────────────────────────────────
 
-// Health check — útil para "acordar" o servidor no Render antes da demo
-// e para testar se a API está no ar.
+// Health check
 app.get("/", (req, res) => {
   res.json({ status: "ok", service: "agencia-guia-api" });
 });
@@ -46,7 +68,7 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// Cria um novo lead a partir do formulário de contato do site
+// PÚBLICA: Cria um novo lead a partir do formulário de contato
 app.post("/api/leads", async (req, res) => {
   try {
     const { name, phone, message } = req.body;
@@ -79,9 +101,8 @@ app.post("/api/leads", async (req, res) => {
   }
 });
 
-// Lista os leads mais recentes — útil para um painel simples ou testes.
-// Em produção, proteja esta rota com autenticação antes de usá-la de verdade.
-app.get("/api/leads", async (req, res) => {
+// PROTEGIDA: Lista os leads cadastrados (Requer ADMIN_API_KEY)
+app.get("/api/leads", requireAuth, async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const result = await pool.query(
