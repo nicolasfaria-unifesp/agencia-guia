@@ -94,7 +94,26 @@ app.post("/api/leads", async (req, res) => {
       [name.trim(), phone.trim(), message.trim()]
     );
 
-    return res.status(201).json({ lead: result.rows[0] });
+    const newLead = result.rows[0];
+
+    // ── Disparo instantâneo para o Make ──────────────────────────────────────
+    const webhookUrl = process.env.MAKE_WEBHOOK_URL;
+
+    if (webhookUrl) {
+      fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newLead),
+      })
+        .then(() => console.log("[webhook] Lead enviado ao Make com sucesso."))
+        .catch((err) =>
+          console.error("[webhook] Erro ao disparar Webhook:", err.message)
+        );
+    } else {
+      console.warn("[webhook] MAKE_WEBHOOK_URL não configurada no .env");
+    }
+
+    return res.status(201).json({ lead: newLead });
   } catch (err) {
     console.error("Erro ao criar lead:", err);
     return res.status(500).json({ error: "Erro interno ao salvar lead." });
